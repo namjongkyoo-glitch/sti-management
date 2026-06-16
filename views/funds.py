@@ -222,13 +222,32 @@ def matrix_tab(tdf, projects):
     out = tdf[tdf["tx_type"] == "지출"].copy()
     prj_map = {p["id"]: p["code"] for p in projects}
     out["프로젝트"] = out["project_id"].map(lambda x: prj_map.get(x, "-"))
-    out["계정"] = out["account_id"].map(
-        lambda a: mid_name(a) if pd.notna(a) else "-")
+
+    level = st.radio("계정 표시 단위", ["중분류", "세부계정"],
+                     horizontal=True, key="matrix_level")
+    if level == "세부계정":
+        def acc_label(a):
+            if pd.isna(a):
+                return "-"
+            acc = helpers.account_by_id(int(a))
+            if not acc:
+                return "-"
+            # 중분류 > 세부 형태로 표시
+            m = mid_name(int(a))
+            return f"{m} > {acc['name_kr']}" if acc["name_kr"] != m \
+                else acc["name_kr"]
+        out["계정"] = out["account_id"].map(acc_label)
+        cap = "프로젝트별 · 세부계정별 지급 완료 금액"
+    else:
+        out["계정"] = out["account_id"].map(
+            lambda a: mid_name(int(a)) if pd.notna(a) else "-")
+        cap = "프로젝트별 · 계정(중분류)별 지급 완료 금액"
+
     pivot = (out.pivot_table(index="계정", columns="프로젝트",
                              values="amount", aggfunc="sum", fill_value=0))
     pivot["합계"] = pivot.sum(axis=1)
     pivot.loc["합계"] = pivot.sum()
-    st.caption("프로젝트별 · 계정(중분류)별 지급 완료 금액")
+    st.caption(cap)
     st.dataframe(pivot.style.format("${:,.0f}"), use_container_width=True)
 
 
