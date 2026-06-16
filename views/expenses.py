@@ -305,13 +305,44 @@ def history_tab(db, editable):
                 st.caption("지급 처리된 거래를 수정하거나 삭제합니다. "
                            "삭제하면 통장 잔액·예산 집행에서 제외되고, "
                            "연결된 신청 건은 '승인' 상태로 되돌아갑니다.")
+                # 통장 · 날짜 필터
+                fcol = st.columns([2, 1.3, 1.3])
+                bank_opts = [None] + helpers.load_bank_accounts(active_only=False)
+                fbank = fcol[0].selectbox(
+                    "통장 필터", bank_opts,
+                    format_func=lambda b: "(전체 통장)" if b is None
+                    else helpers.bank_label(b), key="ftx_bank")
+                all_dates = sorted({str(t["tx_date"])[:10] for t in paid_txs},
+                                   reverse=True)
+                fdate = fcol[1].selectbox("날짜 필터", ["(전체)"] + all_dates,
+                                          key="ftx_date")
+                kw = fcol[2].text_input("검색(내용/프로젝트)", key="ftx_kw")
+
+                filtered = paid_txs
+                if fbank:
+                    filtered = [t for t in filtered
+                                if t.get("bank_account_id") == fbank["id"]]
+                if fdate != "(전체)":
+                    filtered = [t for t in filtered
+                                if str(t["tx_date"])[:10] == fdate]
+                if kw.strip():
+                    k = kw.strip().lower()
+                    filtered = [t for t in filtered
+                                if k in (t.get("description") or "").lower()
+                                or k in prj_map.get(t.get("project_id"), {})
+                                .get("code", "").lower()]
+                if not filtered:
+                    st.info("조건에 맞는 거래가 없습니다.")
+                    st.stop()
                 tsel = st.selectbox(
-                    "거래 선택", paid_txs,
+                    "거래 선택", filtered,
                     format_func=lambda t:
                     f"{t['tx_date']} · "
                     f"{prj_map.get(t.get('project_id'), {}).get('code', '-')} · "
                     f"{(helpers.account_by_id(t['account_id']) or {}).get('name_kr', '-')} · "
-                    f"${float(t['amount']):,.2f} · {t.get('description') or ''}",
+                    f"${float(t['amount']):,.2f} · "
+                    f"{helpers.bank_label_by_id(t.get('bank_account_id'))} · "
+                    f"{t.get('description') or ''}",
                     key="paid_tx_sel")
                 with st.form(f"edit_tx_{tsel['id']}"):
                     ec = st.columns(3)

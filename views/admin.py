@@ -156,6 +156,8 @@ T_SHEETS = {
            "실행일(YYYY-MM-DD)", "만기일", "매월상환일"],
     "거래내역": ["일자(YYYY-MM-DD)*", "구분(수입/지출)*", "프로젝트코드",
              "계정명", "거래처(업체명)", "통장(은행명)", "금액*", "내용"],
+    "이체": ["일자(YYYY-MM-DD)*", "출금통장(은행명)*", "입금통장(은행명)*",
+           "금액*", "분류계정", "비고"],
     "견적품의": ["프로젝트코드*", "프로젝트명", "고객사",
              "버전(본품의/1차변경/2차변경..)*", "변경사유",
              "수주금액", "재료비", "외주비", "직접경비",
@@ -176,6 +178,7 @@ T_SAMPLES = {
            "2023-01-01", "2027-12-31", 25],
     "거래내역": ["2026-04-30", "수입", "P2026-001", "기성금/계약수입",
              "", "Chase", 50000, "1차 기성"],
+    "이체": ["2026-04-30", "CitiDirect", "Chase", 10000, "", "운영자금 이동"],
     "견적품의": ["P2026-001", "Taylor Fab1 Cycle Purge", "SECAI",
              "본품의", "", 130000, 0, 100000, 0, 3900, 0, 5200, 0,
              "2026-04-17", "N"],
@@ -468,6 +471,33 @@ def import_sheet(db, name, df):
             })
         if rows:
             db.table("transactions").insert(rows).execute()
+            ok = len(rows)
+
+    elif name == "이체":
+        bank_map = {}
+        for b in db.table("bank_accounts").select("*").execute().data:
+            bank_map[b["bank_name"]] = b["id"]
+            if b.get("account_name"):
+                bank_map[f"{b['bank_name']} {b['account_name']}"] = b["id"]
+        rows = []
+        for idx, r in df.iterrows():
+            tdate = _d(r, "일자(YYYY-MM-DD)*")
+            frm = bank_map.get(_s(r, "출금통장(은행명)*"))
+            to = bank_map.get(_s(r, "입금통장(은행명)*"))
+            amt = _n(r, "금액*")
+            if not tdate or not frm or not to or amt <= 0:
+                skip += 1
+                errs.append(f"이체 {idx+2}행: 일자/출금통장/입금통장/금액 확인 필요")
+                continue
+            acc_name = _s(r, "분류계정")
+            rows.append({
+                "transfer_date": tdate, "from_account_id": frm,
+                "to_account_id": to, "amount": amt,
+                "account_id": account_id_any(acc_name) if acc_name else None,
+                "notes": _s(r, "비고"),
+            })
+        if rows:
+            db.table("bank_transfers").insert(rows).execute()
             ok = len(rows)
     return ok, skip, errs
 
