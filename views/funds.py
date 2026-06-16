@@ -31,6 +31,10 @@ def render():
                  "amount", "tx_date", "description"])
     if not tdf.empty:
         tdf["amount"] = tdf["amount"].astype(float)
+        # 반환(환불)은 지출의 취소 -> 음수 지출로 변환하여 모든 집계에서 차감
+        mask_refund = tdf["tx_type"] == "반환"
+        tdf.loc[mask_refund, "amount"] = -tdf.loc[mask_refund, "amount"]
+        tdf.loc[mask_refund, "tx_type"] = "지출"
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         ["📊 전체 현황", "📋 자금 요약 검토", "📑 PJT별 수주/손익",

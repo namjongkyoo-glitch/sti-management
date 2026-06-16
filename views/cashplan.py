@@ -87,7 +87,11 @@ def load_actuals(db, months):
         if ym not in months:
             continue
         amt = float(t["amount"] or 0)
-        if t["tx_type"] == "수입":
+        ttype = t["tx_type"]
+        if ttype == "반환":
+            amt = -amt  # 지출 차감
+            ttype = "지출"
+        if ttype == "수입":
             key = (t.get("project_id"), ym)
             income[key] = income.get(key, 0) + amt
         else:

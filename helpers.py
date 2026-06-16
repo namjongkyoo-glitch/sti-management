@@ -132,14 +132,18 @@ def bank_balances() -> list[dict]:
                   if t.get("bank_account_id") == aid and t["tx_type"] == "수입")
         tout = sum(float(t["amount"] or 0) for t in txs
                    if t.get("bank_account_id") == aid and t["tx_type"] == "지출")
+        # 반환: 통장으로 다시 들어오므로 지출에서 차감 (잔액 복구)
+        refund = sum(float(t["amount"] or 0) for t in txs
+                     if t.get("bank_account_id") == aid and t["tx_type"] == "반환")
         trin = sum(float(t["amount"] or 0) for t in trs
                    if t["to_account_id"] == aid)
         trout = sum(float(t["amount"] or 0) for t in trs
                     if t["from_account_id"] == aid)
         base = float(a.get("opening_balance") or 0)
-        res.append({"account": a, "기초": base, "수입": tin, "지출": tout,
+        res.append({"account": a, "기초": base, "수입": tin,
+                    "지출": tout - refund,  # 순지출 = 지출 - 반환
                     "이체입": trin, "이체출": trout,
-                    "잔액": base + tin - tout + trin - trout})
+                    "잔액": base + tin - (tout - refund) + trin - trout})
     return res
 
 

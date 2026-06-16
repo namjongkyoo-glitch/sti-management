@@ -12,12 +12,15 @@ def render():
 
     helpers.page_title("Admin - 사용자 및 권한 관리")
     db = get_db()
-    tab1, tab2, tab3, tab4 = st.tabs(["사용자 관리", "페이지 접근 권한",
-                                      "📥 데이터 일괄 입력", "💾 백업 / 복원"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["사용자 관리", "페이지 접근 권한", "📥 데이터 일괄 입력",
+         "💾 백업 / 복원", "🧾 계정 관리"])
     with tab3:
         bulk_import_tab(db)
     with tab4:
         backup_tab(db)
+    with tab5:
+        accounts_tab(db)
 
     # ------------------------------------------------------
     # 탭 1: 사용자 관리
@@ -731,3 +734,116 @@ def backup_tab(db):
                         st.json(result)
                     except Exception as e:
                         st.error(f"복원 중 오류: {e}")
+
+
+# ============================================================
+# 탭 5: 계정(과목) 관리 - 대분류>중분류>세부 트리 + 추가/수정/삭제
+# ============================================================
+def accounts_tab(db):
+    import pandas as pd
+    st.markdown("### 🧾 계정(과목) 관리")
+    st.caption("계정 체계: 대분류(1) > 중분류(2) > 세부(3). "
+               "공통비 여부는 손익 집계에 영향을 줍니다.")
+
+    accs = db.table("accounts").select("*").order("code").execute().data
+
+    # 트리 표시
+    by_parent = {}
+    for a in accs:
+        by_parent.setdefault(a.get("parent_id"), []).append(a)
+
+    def render_tree(parent_id=None, depth=0):
+        for a in sorted(by_parent.get(parent_id, []),
+                        key=lambda x: (x.get("sort_order") or 0,
+                                       str(x.get("code") or ""))):
+            indent = "　" * depth
+            common = " 🟡공통비" if a.get("is_common") else ""
+            st.markdown(
+                f"{indent}**{a.get('code') or ''}** {a['name_kr']} "
+                f"<span style='color:#888'>(L{a['level']}{common})</span>",
+                unsafe_allow_html=True)
+            render_tree(a["id"], depth + 1)
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.markdown("**현재 계정 체계**")
+        if accs:
+            render_tree()
+        else:
+            st.info("등록된 계정이 없습니다.")
+
+    with col2:
+        st.markdown("**➕ 계정 추가**")
+        with st.form("add_acc", clear_on_submit=True):
+            code = st.text_input("계정 코드 (예: 2100)")
+            name = st.text_input("계정명 *")
+            level = st.selectbox("레벨", [1, 2, 3],
+                                 format_func=lambda x:
+                                 {1: "대분류", 2: "중분류", 3: "세부"}[x])
+            parent_opts = [None] + [a["id"] for a in accs]
+            parent = st.selectbox(
+                "상위 계정", parent_opts,
+                format_func=lambda pid: "(없음 - 대분류)" if pid is None
+                else next((f"{a.get('code') or ''} {a['name_kr']}"
+                           for a in accs if a["id"] == pid), str(pid)))
+            is_common = st.checkbox("공통비 (간접비)")
+            sort_order = st.number_input("정렬 순서", 0, 9999, 0)
+            ok = st.form_submit_button("추가", type="primary")
+        if ok:
+            if not name:
+                st.error("계정명을 입력하세요.")
+            else:
+                db.table("accounts").insert({
+                    "code": code or None, "name_kr": name, "level": level,
+                    "parent_id": parent, "is_common": is_common,
+                    "sort_order": int(sort_order),
+                }).execute()
+                helpers.clear_caches()
+                st.success(f"'{name}' 계정 추가됨")
+                st.rerun()
+
+    # ---- 수정/삭제 ----
+    st.divider()
+    st.markdown("**✏️ 계정 수정 / 삭제**")
+    if accs:
+        sel = st.selectbox(
+            "계정 선택", accs,
+            format_func=lambda a: f"{a.get('code') or ''} {a['name_kr']} "
+            f"(L{a['level']})")
+        with st.form(f"edit_acc_{sel['id']}"):
+            ec1, ec2 = st.columns(2)
+            ecode = ec1.text_input("코드", sel.get("code") or "")
+            ename = ec2.text_input("계정명", sel["name_kr"])
+            ecommon = st.checkbox("공통비", value=bool(sel.get("is_common")))
+            esort = st.number_input("정렬 순서", 0, 9999,
+                                    int(sel.get("sort_order") or 0))
+            colb = st.columns(2)
+            save = colb[0].form_submit_button("저장", type="primary")
+            delete = colb[1].form_submit_button("삭제")
+        if save:
+            db.table("accounts").update({
+                "code": ecode or None, "name_kr": ename,
+                "is_common": ecommon, "sort_order": int(esort),
+            }).eq("id", sel["id"]).execute()
+            helpers.clear_caches()
+            st.success("저장됨")
+            st.rerun()
+        if delete:
+            # 하위 계정 또는 사용 중이면 막기
+            children = [a for a in accs if a.get("parent_id") == sel["id"]]
+            used = (db.table("estimate_lines").select("id")
+                    .eq("account_id", sel["id"]).limit(1).execute().data or
+                    db.table("budget_lines").select("id")
+                    .eq("account_id", sel["id"]).limit(1).execute().data or
+                    db.table("transactions").select("id")
+                    .eq("account_id", sel["id"]).limit(1).execute().data)
+            if children:
+                st.error(f"하위 계정이 {len(children)}개 있어 삭제할 수 없습니다.")
+            elif used:
+                st.error("이 계정을 사용하는 견적/예산/거래가 있어 "
+                         "삭제할 수 없습니다.")
+            else:
+                db.table("accounts").delete().eq("id", sel["id"]).execute()
+                helpers.clear_caches()
+                st.success("삭제됨")
+                st.rerun()

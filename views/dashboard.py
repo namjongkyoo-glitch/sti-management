@@ -89,6 +89,9 @@ def render():
         if txs:
             tdf = pd.DataFrame(txs)
             tdf["amount"] = tdf["amount"].astype(float)
+            _rf = tdf["tx_type"] == "반환"
+            tdf.loc[_rf, "amount"] = -tdf.loc[_rf, "amount"]
+            tdf.loc[_rf, "tx_type"] = "지출"
 
         loans = db.table("loans").select("principal").execute().data
         lpays = db.table("loan_payments").select("principal_paid").execute().data

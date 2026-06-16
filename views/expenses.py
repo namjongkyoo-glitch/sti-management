@@ -295,7 +295,59 @@ def history_tab(db, editable):
                     st.rerun()
         st.divider()
 
-    # ---- 전체 내역 표 ----
+    # ---- 지급 완료 거래 관리 (관리자: 수정/삭제) ----
+    if auth.is_admin():
+        paid_txs = (db.table("transactions").select("*")
+                    .eq("tx_type", "지출")
+                    .order("tx_date", desc=True).limit(100).execute().data)
+        if paid_txs:
+            with st.expander("🔧 지급 완료 거래 수정/삭제 (관리자)"):
+                st.caption("지급 처리된 거래를 수정하거나 삭제합니다. "
+                           "삭제하면 통장 잔액·예산 집행에서 제외되고, "
+                           "연결된 신청 건은 '승인' 상태로 되돌아갑니다.")
+                tsel = st.selectbox(
+                    "거래 선택", paid_txs,
+                    format_func=lambda t:
+                    f"{t['tx_date']} · "
+                    f"{prj_map.get(t.get('project_id'), {}).get('code', '-')} · "
+                    f"{(helpers.account_by_id(t['account_id']) or {}).get('name_kr', '-')} · "
+                    f"${float(t['amount']):,.2f} · {t.get('description') or ''}",
+                    key="paid_tx_sel")
+                with st.form(f"edit_tx_{tsel['id']}"):
+                    ec = st.columns(3)
+                    e_amount = ec[0].number_input(
+                        "금액", value=float(tsel["amount"] or 0),
+                        step=100.0, format="%.2f")
+                    e_date = ec[1].date_input(
+                        "거래일", value=pd.to_datetime(tsel["tx_date"]).date())
+                    e_banks = [None] + helpers.load_bank_accounts()
+                    e_bank = ec[2].selectbox(
+                        "출금 통장", e_banks, format_func=helpers.bank_label,
+                        index=next((i for i, b in enumerate(e_banks)
+                                    if b and b["id"] == tsel.get("bank_account_id")), 0))
+                    e_desc = st.text_input("내용", tsel.get("description") or "")
+                    bcol = st.columns(2)
+                    save = bcol[0].form_submit_button("💾 수정 저장", type="primary")
+                    delete = bcol[1].form_submit_button("🗑️ 거래 삭제")
+                if save:
+                    db.table("transactions").update({
+                        "amount": e_amount, "tx_date": str(e_date),
+                        "bank_account_id": e_bank["id"] if e_bank else None,
+                        "description": e_desc,
+                    }).eq("id", tsel["id"]).execute()
+                    st.success("거래가 수정되었습니다.")
+                    st.rerun()
+                if delete:
+                    # 연결된 신청 건을 승인 상태로 되돌림
+                    if tsel.get("expense_request_id"):
+                        db.table("expense_requests").update({
+                            "status": "승인", "paid_at": None,
+                            "payment_method": None,
+                        }).eq("id", tsel["expense_request_id"]).execute()
+                    db.table("transactions").delete() \
+                        .eq("id", tsel["id"]).execute()
+                    st.success("거래가 삭제되었습니다. (신청 건은 승인 상태로 복귀)")
+                    st.rerun()
     rows = []
     for r in reqs:
         prj = prj_map.get(r["project_id"], {})
@@ -356,6 +408,46 @@ def income_tab(db, editable):
                 st.rerun()
     else:
         st.info("수입 등록 권한이 없습니다.")
+
+    # ---- 지출 반환(환불) 등록 ----
+    if editable:
+        st.divider()
+        st.markdown("**↩️ 지출 반환(환불) 등록**")
+        st.caption("지출했다가 돌려받은 금액입니다. 통장 잔액은 복구되고, "
+                   "수입이 아니라 해당 계정/프로젝트의 지출에서 차감됩니다.")
+        prjs2 = load_projects(db)
+        exp_accs = [a for a in helpers.load_accounts()
+                    if a["level"] == 2 and not str(a.get("code") or "").startswith("1")]
+        with st.form("refund", clear_on_submit=True):
+            r1, r2, r3 = st.columns(3)
+            rprj = r1.selectbox("프로젝트", [None] + prjs2,
+                                format_func=lambda p: "(프로젝트 없음)" if p is None
+                                else f"{p['code']} {p['name']}", key="rfp")
+            racc = r2.selectbox("지출 계정 (반환 대상)", exp_accs,
+                                format_func=lambda a: a["name_kr"], key="rfa")
+            rdate = r3.date_input("반환일", value=date.today(), key="rfd")
+            r4, r5, r6 = st.columns([1, 1.4, 1.6])
+            ramount = r4.number_input("반환 금액 (USD) *", min_value=0.0,
+                                      step=100.0, format="%.2f", key="rfm")
+            rbank = r5.selectbox("입금 통장", [None] + helpers.load_bank_accounts(),
+                                 format_func=helpers.bank_label, key="rfb")
+            rdesc = r6.text_input("내용 *", placeholder="예: 과지급 환불",
+                                  key="rfdesc")
+            rok = st.form_submit_button("↩️ 반환 등록", type="primary")
+        if rok:
+            if ramount <= 0 or not rdesc.strip():
+                st.error("금액과 내용을 입력하세요.")
+            else:
+                db.table("transactions").insert({
+                    "tx_type": "반환",
+                    "project_id": rprj["id"] if rprj else None,
+                    "bank_account_id": rbank["id"] if rbank else None,
+                    "account_id": racc["id"], "amount": ramount,
+                    "tx_date": str(rdate), "description": rdesc.strip(),
+                    "created_by": st.session_state["user"]["id"],
+                }).execute()
+                st.success("지출 반환이 등록되었습니다.")
+                st.rerun()
 
     txs = (db.table("transactions").select("*").eq("tx_type", "수입")
            .order("tx_date", desc=True).limit(50).execute().data)
@@ -444,6 +536,9 @@ def bank_tab(db, editable):
     banks = helpers.load_bank_accounts()
     if len(banks) >= 2:
         st.markdown("**🔁 통장 간 이체** (자금 흐름에 반영되지 않음)")
+        # 이체 분류용 계정 (전체 중분류)
+        xfer_accs = [None] + [a for a in helpers.load_accounts()
+                              if a["level"] == 2]
         with st.form("transfer", clear_on_submit=True):
             c = st.columns(4)
             frm = c[0].selectbox("출금 통장", banks, format_func=helpers.bank_label)
@@ -452,7 +547,12 @@ def bank_tab(db, editable):
             amt = c[2].number_input("금액 (USD)", min_value=0.0, step=100.0,
                                     format="%.2f")
             tdate = c[3].date_input("이체일", value=date.today())
-            tnotes = st.text_input("비고", key="tr_notes")
+            c2 = st.columns(2)
+            xacc = c2[0].selectbox(
+                "분류 계정 (선택)", xfer_accs,
+                format_func=lambda a: "(분류 없음)" if a is None
+                else f"{a.get('code') or ''} {a['name_kr']}")
+            tnotes = c2[1].text_input("비고", key="tr_notes")
             ok = st.form_submit_button("이체 기록", type="primary")
         if ok:
             if frm["id"] == to["id"]:
@@ -463,6 +563,7 @@ def bank_tab(db, editable):
                 db.table("bank_transfers").insert({
                     "from_account_id": frm["id"], "to_account_id": to["id"],
                     "amount": amt, "transfer_date": str(tdate),
+                    "account_id": xacc["id"] if xacc else None,
                     "notes": tnotes,
                     "created_by": st.session_state["user"]["id"],
                 }).execute()
@@ -480,5 +581,7 @@ def bank_tab(db, editable):
             "출금": amap.get(t["from_account_id"], "-"),
             "입금": amap.get(t["to_account_id"], "-"),
             "금액": f"${float(t['amount']):,.2f}",
+            "분류": (helpers.account_by_id(t["account_id"]) or {}).get("name_kr", "-")
+            if t.get("account_id") else "-",
             "비고": t.get("notes") or "",
         } for t in trs]), use_container_width=True, hide_index=True)
