@@ -236,10 +236,11 @@ def detail_screen(db, pid, editable):
     # ── 별첨1: 제작비용 (원재료/외주비) ──
     with st.expander("📎 별첨1 · 제작비용 내역 (원재료 / 외주비)", expanded=False):
         st.caption("원재료 항목")
-        mat_df = pd.DataFrame(s1.get("material", []))
+        mat_df = ps.make_df(s1.get("material", []))
         mat_ed = st.data_editor(
             mat_df, num_rows="dynamic", use_container_width=True,
             disabled=locked, key=k+"s1m",
+            column_order=ps.MAKE_COLS,
             column_config={
                 "대분류": st.column_config.TextColumn("대분류"),
                 "중분류": st.column_config.TextColumn("중분류(품목)"),
@@ -248,10 +249,11 @@ def detail_screen(db, pid, editable):
                 "비고": st.column_config.TextColumn("비고"),
             })
         st.caption("외주비 항목")
-        out_df = pd.DataFrame(s1.get("outsource", []))
+        out_df = ps.make_df(s1.get("outsource", []))
         out_ed = st.data_editor(
             out_df, num_rows="dynamic", use_container_width=True,
             disabled=locked, key=k+"s1o",
+            column_order=ps.MAKE_COLS,
             column_config={
                 "대분류": st.column_config.TextColumn("대분류"),
                 "중분류": st.column_config.TextColumn("중분류(품목)"),
@@ -266,7 +268,7 @@ def detail_screen(db, pid, editable):
 
     # ── 별첨2: 직접경비 ──
     with st.expander("📎 별첨2 · 직접경비 내역", expanded=False):
-        s2_df = pd.DataFrame(s2)
+        s2_df = ps.expense_df(s2)
         s2_ed = st.data_editor(
             s2_df, use_container_width=True, disabled=locked, key=k+"s2",
             column_config={
@@ -280,7 +282,7 @@ def detail_screen(db, pid, editable):
 
     # ── 별첨3: 현지운영비 (외주비에 합산) ──
     with st.expander("📎 별첨3 · 현지운영비 (외주비에 합산)", expanded=False):
-        s3_df = pd.DataFrame(s3)
+        s3_df = ps.expense_df(s3)
         s3_ed = st.data_editor(
             s3_df, use_container_width=True, disabled=locked, key=k+"s3",
             column_config={

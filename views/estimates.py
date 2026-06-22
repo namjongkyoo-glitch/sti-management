@@ -557,10 +557,6 @@ def detail_screen(db, est_id, editable):
     st.divider()
     sheets_section(db, ver, ver_editable)
 
-    # ---- 별첨 (제작비용/직접경비/현지운영비) ----
-    st.divider()
-    attachments_section(db, ver, ver_editable)
-
     # ---- 변경 이력 ----
     chgs = (db.table("estimate_changes").select("*")
             .eq("version_id", ver["id"])
@@ -954,10 +950,6 @@ def excel_button(db, est, versions):
     est_q["_order_amount"] = float(latest["order_amount"] or 0)
     est_q["_direct_items"] = direct_items
     est_q["_sheets"] = load_sheets_data(db, latest["id"])
-    # 별첨 (제작비용/직접경비/현지운영비)
-    est_q["sheet1_data"] = latest.get("sheet1_data")
-    est_q["sheet2_data"] = latest.get("sheet2_data")
-    est_q["sheet3_data"] = latest.get("sheet3_data")
 
     # ---- 2) 견적서 (내부 검토용: 원가/이익 표시) ----
     qdata_internal = build_quotation_excel(est_q, customer=False)
