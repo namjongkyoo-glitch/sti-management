@@ -211,7 +211,8 @@ def list_screen(db, editable):
     base_list = props if show_history else active_props
     fc = st.columns([1.4, 1.4, 2])
     status_opts = ["전체", "작성중", "상신", "승인", "거절"]
-    f_status = fc[0].selectbox("상태", status_opts, key="prop_fstatus")
+    f_status = fc[0].selectbox("상태", status_opts, index=1,
+                               key="prop_fstatus")
     type_set = sorted({p["proposal_type"] for p in base_list
                        if p.get("proposal_type")})
     f_type = fc[1].selectbox("종류", ["전체"] + type_set, key="prop_ftype")
