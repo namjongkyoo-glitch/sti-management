@@ -87,15 +87,23 @@ EXPENSE_COLS = ["구분", "금액", "비고"]
 
 
 def make_df(rows):
-    """제작비용 행 리스트를 정해진 컬럼 순서의 DataFrame으로"""
+    """제작비용 행 리스트를 정해진 컬럼 순서/타입의 DataFrame으로"""
     import pandas as pd
-    if not rows:
-        return pd.DataFrame({c: [] for c in MAKE_COLS})
-    return pd.DataFrame(rows).reindex(columns=MAKE_COLS)
+    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    df = df.reindex(columns=MAKE_COLS)
+    # 타입 명시 (빈 표에서 data_editor 타입 충돌 방지)
+    for c in ("대분류", "중분류", "비고"):
+        df[c] = df[c].astype("object")
+    for c in ("수량", "단가"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0).astype(float)
+    return df
 
 
 def expense_df(rows):
     import pandas as pd
-    if not rows:
-        return pd.DataFrame({c: [] for c in EXPENSE_COLS})
-    return pd.DataFrame(rows).reindex(columns=EXPENSE_COLS)
+    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+    df = df.reindex(columns=EXPENSE_COLS)
+    for c in ("구분", "비고"):
+        df[c] = df[c].astype("object")
+    df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0.0).astype(float)
+    return df
