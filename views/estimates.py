@@ -1232,9 +1232,54 @@ def attachments_section(db, ver, editable):
         s3 = s3_ed.to_dict("records")
         st.info(f"현지운영비 합계: {ps.sheet_total(s3):,.0f}")
 
-    if editable and st.button("💾 별첨 저장", key=f"est_att_save_{vid}"):
-        db.table("estimate_versions").update({
-            "sheet1_data": s1, "sheet2_data": s2, "sheet3_data": s3,
-        }).eq("id", vid).execute()
-        st.success("별첨이 저장되었습니다.")
-        st.rerun()
+    # 별첨 합계 -> 직접비 요약
+    mat, out = ps.sheet1_totals(s1)
+    dexp = ps.sheet_total(s2)
+    local = ps.sheet_total(s3)
+    st.markdown("**별첨 기준 직접비 집계**")
+    mc = st.columns(3)
+    mc[0].metric("재료비 (별첨1 원재료)", f"{mat:,.0f}")
+    mc[1].metric("외주비 (별첨1 외주+별첨3)", f"{out + local:,.0f}")
+    mc[2].metric("직접경비 (별첨2)", f"{dexp:,.0f}")
+
+    if editable:
+        bcol = st.columns(2)
+        if bcol[0].button("💾 별첨 저장", key=f"est_att_save_{vid}"):
+            db.table("estimate_versions").update({
+                "sheet1_data": s1, "sheet2_data": s2, "sheet3_data": s3,
+            }).eq("id", vid).execute()
+            st.success("별첨이 저장되었습니다.")
+            st.rerun()
+        if bcol[1].button("📥 별첨 → 원가항목 직접비 반영",
+                          key=f"est_att_apply_{vid}",
+                          help="별첨의 재료비/외주비/직접경비 합계를 "
+                               "원가 항목(직접비)에 덮어씁니다."):
+            # 별첨 저장
+            db.table("estimate_versions").update({
+                "sheet1_data": s1, "sheet2_data": s2, "sheet3_data": s3,
+            }).eq("id", vid).execute()
+            # 기존 직접비 라인 삭제 후 별첨 합계로 재생성 (간접비는 보존)
+            existing = (db.table("estimate_lines").select("*")
+                        .eq("version_id", vid).execute().data)
+            for l in existing:
+                m = helpers.mid_name_of(l["account_id"])
+                if m in helpers.COST_MIDS_DIRECT \
+                        and (l.get("notes") or "") != SHEET_NOTE:
+                    db.table("estimate_lines").delete() \
+                        .eq("id", l["id"]).execute()
+            new_lines = []
+            if mat > 0:
+                new_lines.append(("원재료", "재료비(별첨1)", mat))
+            if out + local > 0:
+                new_lines.append(("외주비", "외주비(별첨1+별첨3)", out + local))
+            if dexp > 0:
+                new_lines.append(("직접경비", "직접경비(별첨2)", dexp))
+            for midn, item, amt in new_lines:
+                aid = helpers.account_id_by_name(midn, 2)
+                if aid:
+                    db.table("estimate_lines").insert({
+                        "version_id": vid, "account_id": aid,
+                        "item_name": item, "amount": amt,
+                    }).execute()
+            st.success("별첨의 직접비가 원가 항목에 반영되었습니다.")
+            st.rerun()
