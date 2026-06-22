@@ -277,6 +277,7 @@ def _build_attachments(wb, p):
     ws.merge_cells("A1:G1")
     _c(ws, 1, 1, "별첨#1: 제작 비용 내역", bold=True, size=13, align="left",
        border=False)
+    _c(ws, 2, 7, "단위 : 원", size=8, align="right", border=False)
     hdr = ["구분", "대분류", "중분류(품목)", "수량", "단가", "합계금액", "비고"]
     for c, h in enumerate(hdr, 1):
         _c(ws, 3, c, h, fill=HEAD, bold=True)
@@ -321,34 +322,60 @@ def _build_attachments(wb, p):
     total_formula = "=" + "+".join(parts) if parts else 0
     _c(ws, r, 6, total_formula, fill=GREEN, bold=True, fmt="#,##0")
     _c(ws, r, 7, "")
+    # 기타사항 주석
+    r += 2
+    notes1 = [
+        "기타사항 : 원재료 대상 품목은 Filter, Valve 및 Part's 전장자재 만 해당",
+        "         '- Unit(Body), 장비 조립 및 셋업 등 외주비 해당 됨",
+        "※ 특이사항",
+    ]
+    for note in notes1:
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+        _c(ws, r, 1, note, size=8, align="left", border=False)
+        r += 1
 
     # ── 별첨2/별첨3: 항목별 금액 + SUM 합계 ──
-    def expense_sheet(title, rows, ref_key):
+    def expense_sheet(title, rows, ref_key, subtitle=""):
+        import proposal_sheets as ps
         w = wb.create_sheet(title)
         sn = f"'{title}'"
-        for i, wd in enumerate([22, 18, 40], 1):
+        for i, wd in enumerate([24, 18, 50], 1):
             w.column_dimensions[get_column_letter(i)].width = wd
+        # 제목 (A1:C1 병합)
         w.merge_cells("A1:C1")
         _c(w, 1, 1, title.replace("별첨", "별첨#"), bold=True, size=13,
            align="left", border=False)
-        for c, h in enumerate(["구 분", "금액", "비 고"], 1):
+        # 부제 (PL 등)
+        if subtitle:
+            w.merge_cells("A2:C2")
+            _c(w, 2, 1, subtitle, size=9, align="left", border=False)
+        # 헤더
+        for c, h in enumerate(["구 분", "금액 [원]", "비 고"], 1):
             _c(w, 3, c, h, fill=HEAD, bold=True)
         rr = 4
         start = rr
         for row in rows:
             _c(w, rr, 1, row.get("구분", ""), align="left")
-            _c(w, rr, 2, float(row.get("금액") or 0), fmt="#,##0")
+            _c(w, rr, 2, float(row.get("금액") or 0), fmt="#,##0", align="right")
             _c(w, rr, 3, row.get("비고", ""), align="left")
             rr += 1
+        # 합계
         _c(w, rr, 1, "합계", fill=GREEN, bold=True)
         _c(w, rr, 2, f"=SUM(B{start}:B{rr-1})", fill=GREEN, bold=True,
-           fmt="#,##0")
+           fmt="#,##0", align="right")
         _c(w, rr, 3, "")
         refs[ref_key] = f"{sn}!B{rr}"
+        # ── 주석 (예산 수립 시 고려할 세부항목) ──
+        nr = rr + 2
+        for i, note in enumerate(ps.EXPENSE_NOTES):
+            w.merge_cells(start_row=nr, start_column=1, end_row=nr, end_column=3)
+            _c(w, nr, 1, note, size=8, align="left", border=False,
+               bold=(i == 0))
+            nr += 1
 
     if s2:
-        expense_sheet("별첨2-직접경비내역", s2, "dexp")
+        expense_sheet("별첨2-직접경비내역", s2, "dexp", "PL : (직접경비 / 국내 집행)")
     if s3:
-        expense_sheet("별첨3-현지운영비", s3, "local")
+        expense_sheet("별첨3-현지운영비", s3, "local", "PL : (현지운영비 / STI USA)")
 
     return refs
