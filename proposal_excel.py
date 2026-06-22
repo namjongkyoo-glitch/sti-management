@@ -199,14 +199,10 @@ def build_proposal_excel(p: dict, author: str = "") -> bytes:
     cost_top = r
     # 재료비/외주비: 별첨1 참조, 직접경비: 별첨2 참조 (수식)
     mat_v = f"={refs['mat']}" if refs.get("mat") else mat
-    out_parts = [refs["out"]] if refs.get("out") else []
-    if refs.get("local"):  # 현지운영비는 외주비에 합산
-        out_parts.append(refs["local"])
-    out_v = ("=" + "+".join(out_parts)) if out_parts else out
+    out_v = f"={refs['out']}" if refs.get("out") else out
     dexp_v = f"={refs['dexp']}" if refs.get("dexp") else dexp
 
     line("총원가", "재료비", mat_v, pct(mat))
-    ws.cell(row=r - 1, column=1).value = "총원가"
     mat_row = r - 1
     line("직접비", "외주비", out_v, pct(out))
     out_row = r - 1
@@ -236,6 +232,22 @@ def build_proposal_excel(p: dict, author: str = "") -> bytes:
     line("(G) 총예정원가( E + F = A - B )", "", f"=D{e_row}+D{f_row}",
          pct(total + res), "수주액 대비", fill=GRAY, bold=True, merge12=True)
 
+    # ── 셀 병합: 직접비(재료~직접경비), 간접비(노무~판관비) ──
+    # 직접비: A열 mat_row~dexp_row 병합
+    ws.merge_cells(start_row=mat_row, start_column=1,
+                   end_row=dexp_row, end_column=1)
+    _c(ws, mat_row, 1, "직접비", bold=True, size=9, align="center")
+    # 간접비(공통비): A열 lab_row~sga_row 병합
+    ws.merge_cells(start_row=lab_row, start_column=1,
+                   end_row=sga_row, end_column=1)
+    _c(ws, lab_row, 1, "간접비\n(공통비)", bold=True, size=9, align="center")
+    # 총원가 라벨은 직접비+간접비 전체를 감싸지 않고 직접비 위에만 표시되도록
+    # (별도 '총원가' 셀은 제거: 직접비/간접비로 구분)
+    # 예비비: 값이 없으면 0으로 표시 (line에서 res=0이면 이미 0)
+    if not res:
+        _c(ws, f_row, 4, 0, fmt=NUM, align="right", size=9,
+           fill=GREEN, bold=True)
+
     # 푸터
     r += 2
     _c(ws, r, 1, "QSP-401-08(Rev.1)", border=False, size=8, align="left")
@@ -261,6 +273,8 @@ def _build_attachments(wb, p):
     SN1 = "'별첨1-제작비용내역'"
     for i, w in enumerate([6, 14, 30, 8, 14, 16, 24], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
+    # 제목 A1:G1 병합
+    ws.merge_cells("A1:G1")
     _c(ws, 1, 1, "별첨#1: 제작 비용 내역", bold=True, size=13, align="left",
        border=False)
     hdr = ["구분", "대분류", "중분류(품목)", "수량", "단가", "합계금액", "비고"]
@@ -269,44 +283,37 @@ def _build_attachments(wb, p):
     r = 4
     mat_rows = s1.get("material", [])
     out_rows = s1.get("outsource", [])
+    MINROWS = 5  # 데이터 없어도 최소 5줄 공백
 
-    if mat_rows:
+    def make_block(label, rows, ref_key):
+        nonlocal r
+        # 빈 행 패딩으로 최소 MINROWS 보장
+        display = list(rows) + [{} for _ in range(max(0, MINROWS - len(rows)))]
         start = r
-        for row in mat_rows:
-            _c(ws, r, 1, "원재료" if r == start else "", align="center")
+        for i, row in enumerate(display):
+            _c(ws, r, 1, label if i == 0 else "", align="center")
             _c(ws, r, 2, row.get("대분류", ""), align="left")
             _c(ws, r, 3, row.get("중분류", ""), align="left")
-            _c(ws, r, 4, float(row.get("수량") or 0))
-            _c(ws, r, 5, float(row.get("단가") or 0), fmt="#,##0")
-            # 합계금액 = 수량*단가 (SUM 대상 셀, 수식)
-            _c(ws, r, 6, f"=D{r}*E{r}", fmt="#,##0")
+            qty = row.get("수량", "")
+            _c(ws, r, 4, float(qty) if qty not in ("", None) else "")
+            up = row.get("단가", "")
+            _c(ws, r, 5, float(up) if up not in ("", None) else "", fmt="#,##0")
+            # 합계금액 = 수량*단가 (빈 행도 수식, 빈 값이면 0)
+            _c(ws, r, 6, f"=IF(AND(D{r}<>\"\",E{r}<>\"\"),D{r}*E{r},0)", fmt="#,##0")
             _c(ws, r, 7, row.get("비고", ""), align="left")
             r += 1
-        _c(ws, r, 1, "원재료 합계", fill=YELLOW, bold=True, align="center")
+        # 합계 행
+        _c(ws, r, 1, f"{label} 합계", fill=YELLOW, bold=True, align="center")
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
         _c(ws, r, 6, f"=SUM(F{start}:F{r-1})", fill=YELLOW, bold=True,
            fmt="#,##0")
         _c(ws, r, 7, "")
-        refs["mat"] = f"{SN1}!F{r}"
+        refs[ref_key] = f"{SN1}!F{r}"
         r += 1
-    if out_rows:
-        start = r
-        for row in out_rows:
-            _c(ws, r, 1, "외주비" if r == start else "", align="center")
-            _c(ws, r, 2, row.get("대분류", ""), align="left")
-            _c(ws, r, 3, row.get("중분류", ""), align="left")
-            _c(ws, r, 4, float(row.get("수량") or 0))
-            _c(ws, r, 5, float(row.get("단가") or 0), fmt="#,##0")
-            _c(ws, r, 6, f"=D{r}*E{r}", fmt="#,##0")
-            _c(ws, r, 7, row.get("비고", ""), align="left")
-            r += 1
-        _c(ws, r, 1, "외주비 합계", fill=YELLOW, bold=True, align="center")
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
-        _c(ws, r, 6, f"=SUM(F{start}:F{r-1})", fill=YELLOW, bold=True,
-           fmt="#,##0")
-        _c(ws, r, 7, "")
-        refs["out"] = f"{SN1}!F{r}"
-        r += 1
+
+    make_block("원재료", mat_rows, "mat")
+    make_block("외주비", out_rows, "out")
+
     # TOTAL = 원재료합계 + 외주비합계
     _c(ws, r, 1, "TOTAL 합계", fill=GREEN, bold=True, align="center")
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
@@ -321,6 +328,7 @@ def _build_attachments(wb, p):
         sn = f"'{title}'"
         for i, wd in enumerate([22, 18, 40], 1):
             w.column_dimensions[get_column_letter(i)].width = wd
+        w.merge_cells("A1:C1")
         _c(w, 1, 1, title.replace("별첨", "별첨#"), bold=True, size=13,
            align="left", border=False)
         for c, h in enumerate(["구 분", "금액", "비 고"], 1):
