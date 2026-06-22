@@ -422,10 +422,17 @@ def build_quotation_excel(est: dict, customer: bool = False) -> bytes:
         else:
             sheet_mgmt_detail(wb)
             sheet_labor_materials(wb)
-        # 별첨 (제작비용/직접경비/현지운영비)
-        if any(est.get(k) for k in ("sheet1_data", "sheet2_data", "sheet3_data")):
-            from proposal_excel import _build_attachments
-            _build_attachments(wb, est)
+        # 별첨 (제작비용/직접경비/현지운영비) - 내부용은 항상 생성
+        from proposal_excel import _build_attachments
+        import proposal_sheets as ps
+        est = dict(est)  # 원본 보호
+        if not est.get("sheet1_data"):
+            est["sheet1_data"] = ps.empty_sheet1()
+        if not est.get("sheet2_data"):
+            est["sheet2_data"] = ps.empty_sheet2()
+        if not est.get("sheet3_data"):
+            est["sheet3_data"] = ps.empty_sheet3()
+        _build_attachments(wb, est)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
