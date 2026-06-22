@@ -266,6 +266,29 @@ def detail_screen(db, pid, editable):
     admin = auth.is_admin()
     locked = p["status"] in ("상신", "승인") or not editable
 
+    # ---- 별첨 ↔ 직접비 자동 동기화 (승인/상신 외 모든 상태) ----
+    if p.get("status") not in ("승인", "상신"):
+        import proposal_sheets as ps
+        s1 = p.get("sheet1_data") or {}
+        s2 = p.get("sheet2_data") or []
+        mat_sync, out_sync = ps.sheet1_totals(s1)
+        sync = {}
+        # 별첨1 키가 존재하면(빈 배열 포함) 재료비/외주비를 별첨 합계로 맞춤
+        if "material" in s1 and \
+                abs(float(p.get("material_cost") or 0) - mat_sync) > 0.01:
+            sync["material_cost"] = mat_sync
+        if "outsource" in s1 and \
+                abs(float(p.get("outsourcing_cost") or 0) - out_sync) > 0.01:
+            sync["outsourcing_cost"] = out_sync
+        # 별첨2가 있으면 직접경비를 별첨2 합계로 맞춤
+        if s2:
+            dexp_sync = ps.sheet_total(s2)
+            if abs(float(p.get("direct_expense") or 0) - dexp_sync) > 0.01:
+                sync["direct_expense"] = dexp_sync
+        if sync:
+            db.table("proposals").update(sync).eq("id", pid).execute()
+            p = {**p, **sync}
+
     top = st.columns([1, 4.5, 2.5])
     if top[0].button("← 목록"):
         st.session_state["prop_open"] = None
@@ -373,10 +396,10 @@ def detail_screen(db, pid, editable):
             }, hide_index=True)
         s3 = s3_ed.to_dict("records")
         local_ops = ps.sheet_total(s3)
-        st.info(f"현지운영비 합계: {local_ops:,.0f} (외주비에 포함됨)")
+        st.info(f"현지운영비 합계: {local_ops:,.0f} "
+                "(참고용 — 외주비에는 합산되지 않음)")
 
-    # 현지운영비를 외주비에 합산 (양식상 외주비 항목에 법인운용비로 포함)
-    out = out + local_ops
+    # 외주비는 별첨1에서만 (별첨3 현지운영비는 외주비에 합산하지 않음)
 
     # 간접비 (수주금액 대비 % 또는 직접 입력)
     st.markdown("**간접비 (공통비)**")
