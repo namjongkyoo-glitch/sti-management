@@ -288,6 +288,7 @@ def _build_attachments(wb, p):
 
     def make_block(label, rows, ref_key):
         nonlocal r
+        has_data = bool(rows)  # 실제 입력 데이터 유무
         # 빈 행 패딩으로 최소 MINROWS 보장
         display = list(rows) + [{} for _ in range(max(0, MINROWS - len(rows)))]
         start = r
@@ -309,7 +310,9 @@ def _build_attachments(wb, p):
         _c(ws, r, 6, f"=SUM(F{start}:F{r-1})", fill=YELLOW, bold=True,
            fmt="#,##0")
         _c(ws, r, 7, "")
-        refs[ref_key] = f"{SN1}!F{r}"
+        # 데이터가 있을 때만 참조 설정 (빈 블록은 품의서가 저장값을 쓰도록)
+        if has_data:
+            refs[ref_key] = f"{SN1}!F{r}"
         r += 1
 
     make_block("원재료", mat_rows, "mat")
@@ -364,7 +367,9 @@ def _build_attachments(wb, p):
         _c(w, rr, 2, f"=SUM(B{start}:B{rr-1})", fill=GREEN, bold=True,
            fmt="#,##0", align="right")
         _c(w, rr, 3, "")
-        refs[ref_key] = f"{sn}!B{rr}"
+        # 실제 금액 합이 0보다 클 때만 참조
+        if sum(float(x.get("금액") or 0) for x in rows) > 0.01:
+            refs[ref_key] = f"{sn}!B{rr}"
         # ── 주석 (예산 수립 시 고려할 세부항목) ──
         nr = rr + 2
         for i, note in enumerate(ps.EXPENSE_NOTES):
