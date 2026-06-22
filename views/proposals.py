@@ -350,10 +350,15 @@ def detail_screen(db, pid, editable):
                  "품의": order, "비율(%)": "100%", "비고": "", "_lv": 9})
     # 직접비
     add("총원가", "원재료", "소계", mat, note="")
-    if out_by_vendor:
+    # 외주비: 업체 명세 합이 소계(out)와 다르면 소계 기준으로 정규화
+    vendor_sum = sum(out_by_vendor.values())
+    if out_by_vendor and vendor_sum > 0.01 and abs(vendor_sum - out) > 0.01:
+        # 명세를 소계 비율로 조정 (명세 합 = 소계)
+        scale = out / vendor_sum
+        out_by_vendor = {v: a * scale for v, a in out_by_vendor.items()}
+    if out_by_vendor and out > 0.01:
         for vname2, vamt in out_by_vendor.items():
             add("총원가", "외주비", vname2, vamt)
-        # 업체 미지정분
         remain = out - sum(out_by_vendor.values())
         if remain > 0.01:
             add("총원가", "외주비", "기타(미지정)", remain)
@@ -477,6 +482,41 @@ def detail_screen(db, pid, editable):
         file_name=helpers.safe_filename(p["doc_no"], p.get("project_name") or p.get("title"), "품의서") + ".xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True)
+
+    # ---- 관리자: 불필요한 값 정리 ----
+    if admin:
+        st.divider()
+        with st.popover("🧹 값 정리 (관리자)"):
+            st.caption("불필요하게 남아있는 값을 비웁니다. "
+                       "선택한 항목이 0으로 초기화됩니다.")
+            clr = st.columns(2)
+            clear_out = clr[0].checkbox("외주비 + 외주 업체명세 비우기",
+                                        key=k+"co")
+            clear_s1o = clr[0].checkbox("별첨1 외주비 항목 비우기", key=k+"cs1o")
+            clear_s3 = clr[1].checkbox("별첨3(현지운영비) 비우기", key=k+"cs3")
+            clear_dexp = clr[1].checkbox("직접경비 + 별첨2 비우기", key=k+"cde")
+            if st.button("선택 항목 비우기", type="primary", key=k+"clrb"):
+                upd = {}
+                if clear_out:
+                    upd["outsourcing_cost"] = 0
+                    upd["vendor_breakdown"] = []
+                if clear_s1o:
+                    s1cur = p.get("sheet1_data") or {}
+                    s1cur = dict(s1cur)
+                    s1cur["outsource"] = []
+                    upd["sheet1_data"] = s1cur
+                    upd["outsourcing_cost"] = 0
+                if clear_s3:
+                    upd["sheet3_data"] = []
+                if clear_dexp:
+                    upd["direct_expense"] = 0
+                    upd["sheet2_data"] = []
+                if upd:
+                    db.table("proposals").update(upd).eq("id", pid).execute()
+                    st.success("선택한 값이 정리되었습니다.")
+                    st.rerun()
+                else:
+                    st.info("정리할 항목을 선택하세요.")
 
     # ---- 관리자: 품의서 삭제 (승인 전까지만) ----
     if admin and p["status"] != "승인":
