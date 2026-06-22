@@ -139,6 +139,45 @@ def list_screen(db, editable):
                 st.rerun()
 
             st.divider()
+            # ---- 방법 1-B: 기존 품의서에서 불러오기 (변경품의) ----
+            st.markdown("**①-B 기존 품의서에서 불러와 변경품의 작성**")
+            st.caption("기존 품의서의 모든 값을 복사해 새 변경품의를 만듭니다. "
+                       "원본은 History로 보관(숨김)됩니다.")
+            base_props = (db.table("proposals").select("*")
+                          .eq("is_archived", False)
+                          .order("created_at", desc=True).execute().data)
+            bp = st.columns([3.5, 1])
+            src_prop = bp[0].selectbox(
+                "원본 품의서 선택", base_props,
+                format_func=lambda p:
+                f"{p['doc_no']} · {p.get('proposal_type','')} · "
+                f"{p.get('title','')} [{p.get('status','')}]"
+                if base_props else None,
+                key="src_prop") if base_props else None
+            if bp[1].button("불러와 변경품의", type="primary",
+                            disabled=not src_prop, key="load_from_prop"):
+                # 원본 모든 값 복사 (id/문서번호/상태/결재정보 제외)
+                src = dict(src_prop)
+                for kk in ("id", "doc_no", "status", "decided_by", "decided_at",
+                           "created_at", "result_note", "is_archived",
+                           "superseded_by"):
+                    src.pop(kk, None)
+                new_row = db.table("proposals").insert({
+                    **src,
+                    "doc_no": next_doc_no(db),
+                    "proposal_type": "변경품의",
+                    "status": "작성중",
+                    "created_by": st.session_state["user"]["id"],
+                }).execute().data[0]
+                # 원본을 History로 숨김 + 연결
+                db.table("proposals").update({
+                    "is_archived": True,
+                    "superseded_by": new_row["id"],
+                }).eq("id", src_prop["id"]).execute()
+                st.session_state["prop_open"] = new_row["id"]
+                st.rerun()
+
+            st.divider()
             # ---- 방법 2: 빈 양식 ----
             st.markdown("**② 빈 양식으로 작성**")
             c = st.columns([2.5, 1.3, 1])
@@ -160,16 +199,25 @@ def list_screen(db, editable):
     props = (db.table("proposals").select("*")
              .order("created_at", desc=True).execute().data)
 
+    # History(보관)와 일반 분리
+    active_props = [p for p in props if not p.get("is_archived")]
+    archived_props = [p for p in props if p.get("is_archived")]
+
     # ---- 필터 / 검색 ----
     st.subheader("품의서 목록")
+    show_history = st.checkbox(
+        f"📦 History 포함 (보관된 {len(archived_props)}건)", value=False,
+        key="prop_show_history")
+    base_list = props if show_history else active_props
     fc = st.columns([1.4, 1.4, 2])
     status_opts = ["전체", "작성중", "상신", "승인", "거절"]
     f_status = fc[0].selectbox("상태", status_opts, key="prop_fstatus")
-    type_set = sorted({p["proposal_type"] for p in props if p.get("proposal_type")})
+    type_set = sorted({p["proposal_type"] for p in base_list
+                       if p.get("proposal_type")})
     f_type = fc[1].selectbox("종류", ["전체"] + type_set, key="prop_ftype")
     kw = fc[2].text_input("검색 (문서번호/제목/프로젝트)", key="prop_fkw")
 
-    filtered = props
+    filtered = base_list
     if f_status != "전체":
         filtered = [p for p in filtered if p.get("status") == f_status]
     if f_type != "전체":
@@ -181,10 +229,10 @@ def list_screen(db, editable):
                     or k in (p.get("title") or "").lower()
                     or k in (p.get("project_name") or "").lower()]
 
-    # 상태별 건수 요약
-    cnt = {s: sum(1 for p in props if p.get("status") == s)
+    # 상태별 건수 요약 (활성 기준)
+    cnt = {s: sum(1 for p in active_props if p.get("status") == s)
            for s in ["작성중", "상신", "승인", "거절"]}
-    st.caption(f"전체 {len(props)}건 · 작성중 {cnt['작성중']} · "
+    st.caption(f"활성 {len(active_props)}건 · 작성중 {cnt['작성중']} · "
                f"상신 {cnt['상신']} · 승인 {cnt['승인']} · 거절 {cnt['거절']}  "
                f"→ 표시 {len(filtered)}건")
 
@@ -197,7 +245,8 @@ def list_screen(db, editable):
         col.markdown(f"**{t}**")
     for p in filtered:
         c = st.columns([2, 1.3, 3, 1.6, 1.2, 0.9])
-        c[0].write(f"**{p['doc_no']}**")
+        arch = " 📦" if p.get("is_archived") else ""
+        c[0].write(f"**{p['doc_no']}**{arch}")
         c[1].write(p["proposal_type"])
         c[2].write(p["title"])
         c[3].write(P_BADGE.get(p["status"], p["status"]))
