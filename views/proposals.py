@@ -159,11 +159,43 @@ def list_screen(db, editable):
 
     props = (db.table("proposals").select("*")
              .order("created_at", desc=True).execute().data)
-    st.subheader(f"품의서 목록 ({len(props)})")
-    if not props:
-        st.info("작성된 품의서가 없습니다.")
+
+    # ---- 필터 / 검색 ----
+    st.subheader("품의서 목록")
+    fc = st.columns([1.4, 1.4, 2])
+    status_opts = ["전체", "작성중", "상신", "승인", "거절"]
+    f_status = fc[0].selectbox("상태", status_opts, key="prop_fstatus")
+    type_set = sorted({p["proposal_type"] for p in props if p.get("proposal_type")})
+    f_type = fc[1].selectbox("종류", ["전체"] + type_set, key="prop_ftype")
+    kw = fc[2].text_input("검색 (문서번호/제목/프로젝트)", key="prop_fkw")
+
+    filtered = props
+    if f_status != "전체":
+        filtered = [p for p in filtered if p.get("status") == f_status]
+    if f_type != "전체":
+        filtered = [p for p in filtered if p.get("proposal_type") == f_type]
+    if kw.strip():
+        k = kw.strip().lower()
+        filtered = [p for p in filtered
+                    if k in (p.get("doc_no") or "").lower()
+                    or k in (p.get("title") or "").lower()
+                    or k in (p.get("project_name") or "").lower()]
+
+    # 상태별 건수 요약
+    cnt = {s: sum(1 for p in props if p.get("status") == s)
+           for s in ["작성중", "상신", "승인", "거절"]}
+    st.caption(f"전체 {len(props)}건 · 작성중 {cnt['작성중']} · "
+               f"상신 {cnt['상신']} · 승인 {cnt['승인']} · 거절 {cnt['거절']}  "
+               f"→ 표시 {len(filtered)}건")
+
+    if not filtered:
+        st.info("조건에 맞는 품의서가 없습니다.")
         return
-    for p in props:
+    # 헤더
+    h = st.columns([2, 1.3, 3, 1.6, 1.2, 0.9])
+    for col, t in zip(h, ["문서번호", "종류", "제목", "상태", "작성일", ""]):
+        col.markdown(f"**{t}**")
+    for p in filtered:
         c = st.columns([2, 1.3, 3, 1.6, 1.2, 0.9])
         c[0].write(f"**{p['doc_no']}**")
         c[1].write(p["proposal_type"])
