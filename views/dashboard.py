@@ -35,11 +35,12 @@ def render():
     # ---- 1행: 프로젝트/견적 (전체 공개) ----
     def metric_card(col, label, value, color, icon=""):
         col.markdown(
-            f"<div style='background:linear-gradient(135deg,{color}22,{color}08);"
-            f"border:1px solid {color}55;border-radius:12px;padding:14px 16px;'>"
-            f"<div style='font-size:12px;color:#9aa4b2;margin-bottom:4px'>"
-            f"{icon} {label}</div>"
-            f"<div style='font-size:24px;font-weight:800;color:#fff'>{value}</div>"
+            f"<div style='background:linear-gradient(135deg,{color}33,{color}14);"
+            f"border:1px solid {color}77;border-radius:12px;padding:14px 16px;'>"
+            f"<div style='font-size:12px;color:#c9d1de;margin-bottom:4px;"
+            f"font-weight:600'>{icon} {label}</div>"
+            f"<div style='font-size:24px;font-weight:800;color:#ffffff'>"
+            f"{value}</div>"
             f"</div>", unsafe_allow_html=True)
 
     st.markdown("##### 📊 핵심 현황")

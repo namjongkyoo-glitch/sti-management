@@ -413,7 +413,7 @@ def sheet_detail_dynamic(wb, name: str, items: list[dict]):
 def build_quotation_excel(est: dict, customer: bool = False) -> bytes:
     wb = Workbook()
     sheet_cover(wb, est, customer=customer)
-    # 고객 제출용은 갑지(총액)만, 내부용은 속지 상세까지 포함
+    # 고객 제출용은 갑지(총액)만, 내부용은 속지 상세 + 별첨까지 포함
     if not customer:
         sheets = est.get("_sheets") or []
         if sheets:
@@ -422,6 +422,10 @@ def build_quotation_excel(est: dict, customer: bool = False) -> bytes:
         else:
             sheet_mgmt_detail(wb)
             sheet_labor_materials(wb)
+        # 별첨 (제작비용/직접경비/현지운영비)
+        if any(est.get(k) for k in ("sheet1_data", "sheet2_data", "sheet3_data")):
+            from proposal_excel import _build_attachments
+            _build_attachments(wb, est)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()

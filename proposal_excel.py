@@ -211,6 +211,97 @@ def build_proposal_excel(p: dict, author: str = "") -> bytes:
     _c(ws, r, 3, "STI Co., Ltd.", border=False, size=8)
     _c(ws, r, 6, "A4(210mm x 297mm)", border=False, size=8, align="right")
 
+    _build_attachments(wb, p)
+
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _build_attachments(wb, p):
+    """별첨1(제작비용), 별첨2(직접경비), 별첨3(현지운영비) 시트 생성"""
+    import proposal_sheets as ps
+    s1 = p.get("sheet1_data") or {}
+    s2 = p.get("sheet2_data") or []
+    s3 = p.get("sheet3_data") or []
+
+    # ── 별첨1: 제작비용 내역 ──
+    ws = wb.create_sheet("별첨1-제작비용내역")
+    for i, w in enumerate([6, 14, 30, 8, 14, 16, 24], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    _c(ws, 1, 1, "별첨#1: 제작 비용 내역", bold=True, size=13, align="left",
+       border=False)
+    hdr = ["구분", "대분류", "중분류(품목)", "수량", "단가", "합계금액", "비고"]
+    for c, h in enumerate(hdr, 1):
+        _c(ws, 3, c, h, fill=HEAD, bold=True)
+    r = 4
+    mat_rows = s1.get("material", [])
+    out_rows = s1.get("outsource", [])
+    mat_total = out_total = 0
+    if mat_rows:
+        start = r
+        for row in mat_rows:
+            amt = float(row.get("수량") or 0) * float(row.get("단가") or 0)
+            mat_total += amt
+            _c(ws, r, 1, "원재료" if r == start else "", align="center")
+            _c(ws, r, 2, row.get("대분류", ""), align="left")
+            _c(ws, r, 3, row.get("중분류", ""), align="left")
+            _c(ws, r, 4, row.get("수량", 0))
+            _c(ws, r, 5, float(row.get("단가") or 0), fmt="#,##0")
+            _c(ws, r, 6, amt, fmt="#,##0")
+            _c(ws, r, 7, row.get("비고", ""), align="left")
+            r += 1
+        _c(ws, r, 1, "원재료 합계", fill=YELLOW, bold=True, align="center")
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        _c(ws, r, 6, mat_total, fill=YELLOW, bold=True, fmt="#,##0")
+        _c(ws, r, 7, "")
+        r += 1
+    if out_rows:
+        start = r
+        for row in out_rows:
+            amt = float(row.get("수량") or 0) * float(row.get("단가") or 0)
+            out_total += amt
+            _c(ws, r, 1, "외주비" if r == start else "", align="center")
+            _c(ws, r, 2, row.get("대분류", ""), align="left")
+            _c(ws, r, 3, row.get("중분류", ""), align="left")
+            _c(ws, r, 4, row.get("수량", 0))
+            _c(ws, r, 5, float(row.get("단가") or 0), fmt="#,##0")
+            _c(ws, r, 6, amt, fmt="#,##0")
+            _c(ws, r, 7, row.get("비고", ""), align="left")
+            r += 1
+        _c(ws, r, 1, "외주비 합계", fill=YELLOW, bold=True, align="center")
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+        _c(ws, r, 6, out_total, fill=YELLOW, bold=True, fmt="#,##0")
+        _c(ws, r, 7, "")
+        r += 1
+    _c(ws, r, 1, "TOTAL 합계", fill=GREEN, bold=True, align="center")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
+    _c(ws, r, 6, mat_total + out_total, fill=GREEN, bold=True, fmt="#,##0")
+    _c(ws, r, 7, "")
+
+    # ── 별첨2: 직접경비 / 별첨3: 현지운영비 ──
+    def expense_sheet(title, rows, total_label):
+        w = wb.create_sheet(title)
+        for i, wd in enumerate([22, 18, 40], 1):
+            w.column_dimensions[get_column_letter(i)].width = wd
+        _c(w, 1, 1, title.replace("별첨", "별첨#"), bold=True, size=13,
+           align="left", border=False)
+        for c, h in enumerate(["구 분", "금액", "비 고"], 1):
+            _c(w, 3, c, h, fill=HEAD, bold=True)
+        rr = 4
+        tot = 0
+        for row in rows:
+            amt = float(row.get("금액") or 0)
+            tot += amt
+            _c(w, rr, 1, row.get("구분", ""), align="left")
+            _c(w, rr, 2, amt, fmt="#,##0")
+            _c(w, rr, 3, row.get("비고", ""), align="left")
+            rr += 1
+        _c(w, rr, 1, total_label, fill=GREEN, bold=True)
+        _c(w, rr, 2, tot, fill=GREEN, bold=True, fmt="#,##0")
+        _c(w, rr, 3, "")
+
+    if s2:
+        expense_sheet("별첨2-직접경비내역", s2, "합계")
+    if s3:
+        expense_sheet("별첨3-현지운영비", s3, "합계")

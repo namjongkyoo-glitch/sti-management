@@ -226,12 +226,13 @@ def list_header(cols_spec, titles):
 def metric_card(col, label, value, color="#3B82F6", icon=""):
     """대시보드/현황용 컬러 카드 (col은 st.columns 요소)"""
     col.markdown(
-        f"<div style='background:linear-gradient(135deg,{color}22,{color}08);"
-        f"border:1px solid {color}55;border-radius:12px;padding:14px 16px;"
+        f"<div style='background:linear-gradient(135deg,{color}33,{color}14);"
+        f"border:1px solid {color}77;border-radius:12px;padding:14px 16px;"
         f"margin-bottom:6px'>"
-        f"<div style='font-size:12px;color:#9aa4b2;margin-bottom:4px'>"
-        f"{icon} {label}</div>"
-        f"<div style='font-size:22px;font-weight:800;color:#fff'>{value}</div>"
+        f"<div style='font-size:12px;color:#c9d1de;margin-bottom:4px;"
+        f"font-weight:600'>{icon} {label}</div>"
+        f"<div style='font-size:22px;font-weight:800;color:#ffffff'>"
+        f"{value}</div>"
         f"</div>", unsafe_allow_html=True)
 
 

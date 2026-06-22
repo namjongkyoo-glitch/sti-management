@@ -221,16 +221,82 @@ def detail_screen(db, pid, editable):
     opinion = st.text_input("의견", p.get("opinion") or "", disabled=locked, key=k+"op")
 
     # ---- 집행 내역: 값 변경 시 전체 자동 연산 ----
-    st.markdown(f"**10. 집행 내역** (단위: {cur}) — 값을 바꾸면 아래 합계가 즉시 재계산됩니다")
-    cc = st.columns(4)
-    order = cc[0].number_input("(A) 수주금액", value=float(p.get("order_amount") or 0),
-                               step=1000.0, format="%.0f", disabled=locked, key=k+"a")
-    mat = cc[1].number_input("재료비", value=float(p.get("material_cost") or 0),
-                             step=1000.0, format="%.0f", disabled=locked, key=k+"m")
-    out = cc[2].number_input("외주비", value=float(p.get("outsourcing_cost") or 0),
-                             step=1000.0, format="%.0f", disabled=locked, key=k+"o")
-    dexp = cc[3].number_input("직접경비", value=float(p.get("direct_expense") or 0),
-                              step=1000.0, format="%.0f", disabled=locked, key=k+"de")
+    import proposal_sheets as ps
+    st.markdown(f"**10. 집행 내역** (단위: {cur}) — 별첨 시트에 입력하면 "
+                "직접비가 자동 계산됩니다")
+
+    # 별첨 데이터 로드 (없으면 빈 양식)
+    s1 = p.get("sheet1_data") or ps.empty_sheet1()
+    s2 = p.get("sheet2_data") or ps.empty_sheet2()
+    s3 = p.get("sheet3_data") or ps.empty_sheet3()
+
+    order = st.number_input("(A) 수주금액", value=float(p.get("order_amount") or 0),
+                            step=1000.0, format="%.0f", disabled=locked, key=k+"a")
+
+    # ── 별첨1: 제작비용 (원재료/외주비) ──
+    with st.expander("📎 별첨1 · 제작비용 내역 (원재료 / 외주비)", expanded=False):
+        st.caption("원재료 항목")
+        mat_df = pd.DataFrame(s1.get("material", []))
+        mat_ed = st.data_editor(
+            mat_df, num_rows="dynamic", use_container_width=True,
+            disabled=locked, key=k+"s1m",
+            column_config={
+                "대분류": st.column_config.TextColumn("대분류"),
+                "중분류": st.column_config.TextColumn("중분류(품목)"),
+                "수량": st.column_config.NumberColumn("수량", default=1),
+                "단가": st.column_config.NumberColumn("단가", format="%.0f"),
+                "비고": st.column_config.TextColumn("비고"),
+            })
+        st.caption("외주비 항목")
+        out_df = pd.DataFrame(s1.get("outsource", []))
+        out_ed = st.data_editor(
+            out_df, num_rows="dynamic", use_container_width=True,
+            disabled=locked, key=k+"s1o",
+            column_config={
+                "대분류": st.column_config.TextColumn("대분류"),
+                "중분류": st.column_config.TextColumn("중분류(품목)"),
+                "수량": st.column_config.NumberColumn("수량", default=1),
+                "단가": st.column_config.NumberColumn("단가", format="%.0f"),
+                "비고": st.column_config.TextColumn("비고"),
+            })
+        s1 = {"material": mat_ed.to_dict("records"),
+              "outsource": out_ed.to_dict("records")}
+        mat, out = ps.sheet1_totals(s1)
+        st.info(f"재료비 합계: {mat:,.0f}  ·  외주비 합계: {out:,.0f}")
+
+    # ── 별첨2: 직접경비 ──
+    with st.expander("📎 별첨2 · 직접경비 내역", expanded=False):
+        s2_df = pd.DataFrame(s2)
+        s2_ed = st.data_editor(
+            s2_df, use_container_width=True, disabled=locked, key=k+"s2",
+            column_config={
+                "구분": st.column_config.TextColumn("구분", disabled=True),
+                "금액": st.column_config.NumberColumn("금액", format="%.0f"),
+                "비고": st.column_config.TextColumn("비고"),
+            }, hide_index=True)
+        s2 = s2_ed.to_dict("records")
+        dexp = ps.sheet_total(s2)
+        st.info(f"직접경비 합계: {dexp:,.0f}")
+
+    # ── 별첨3: 현지운영비 (외주비에 합산) ──
+    with st.expander("📎 별첨3 · 현지운영비 (외주비에 합산)", expanded=False):
+        s3_df = pd.DataFrame(s3)
+        s3_ed = st.data_editor(
+            s3_df, use_container_width=True, disabled=locked, key=k+"s3",
+            column_config={
+                "구분": st.column_config.TextColumn("구분", disabled=True),
+                "금액": st.column_config.NumberColumn("금액", format="%.0f"),
+                "비고": st.column_config.TextColumn("비고"),
+            }, hide_index=True)
+        s3 = s3_ed.to_dict("records")
+        local_ops = ps.sheet_total(s3)
+        st.info(f"현지운영비 합계: {local_ops:,.0f} (외주비에 포함됨)")
+
+    # 현지운영비를 외주비에 합산 (양식상 외주비 항목에 법인운용비로 포함)
+    out = out + local_ops
+
+    # 간접비 (수주금액 대비 % 또는 직접 입력)
+    st.markdown("**간접비 (공통비)**")
     cc = st.columns(4)
     lab = cc[0].number_input("노무비", value=float(p.get("labor_cost") or 0),
                              step=100.0, format="%.0f", disabled=locked, key=k+"l")
@@ -356,6 +422,7 @@ def detail_screen(db, pid, editable):
         "material_cost": mat, "outsourcing_cost": out,
         "direct_expense": dexp, "labor_cost": lab,
         "mfg_overhead": mfg, "sga_cost": sga, "reserve": res,
+        "sheet1_data": s1, "sheet2_data": s2, "sheet3_data": s3,
     }
 
     st.divider()

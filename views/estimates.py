@@ -557,6 +557,10 @@ def detail_screen(db, est_id, editable):
     st.divider()
     sheets_section(db, ver, ver_editable)
 
+    # ---- 별첨 (제작비용/직접경비/현지운영비) ----
+    st.divider()
+    attachments_section(db, ver, ver_editable)
+
     # ---- 변경 이력 ----
     chgs = (db.table("estimate_changes").select("*")
             .eq("version_id", ver["id"])
@@ -950,6 +954,10 @@ def excel_button(db, est, versions):
     est_q["_order_amount"] = float(latest["order_amount"] or 0)
     est_q["_direct_items"] = direct_items
     est_q["_sheets"] = load_sheets_data(db, latest["id"])
+    # 별첨 (제작비용/직접경비/현지운영비)
+    est_q["sheet1_data"] = latest.get("sheet1_data")
+    est_q["sheet2_data"] = latest.get("sheet2_data")
+    est_q["sheet3_data"] = latest.get("sheet3_data")
 
     # ---- 2) 견적서 (내부 검토용: 원가/이익 표시) ----
     qdata_internal = build_quotation_excel(est_q, customer=False)
@@ -1167,3 +1175,66 @@ def sheets_section(db, ver, editable):
                 db.table("estimate_sheets").delete()                     .eq("id", sel["id"]).execute()
                 sync_sheets_to_lines(db, ver["id"])
                 st.rerun()
+
+
+def attachments_section(db, ver, editable):
+    """견적 별첨: 제작비용(원재료/외주비)/직접경비/현지운영비"""
+    import proposal_sheets as ps
+    st.markdown("**📎 별첨 (제작비용 / 직접경비 / 현지운영비)**")
+    st.caption("실행품의 양식의 별첨입니다. 입력하면 견적서 내부검토용 "
+               "엑셀에 별첨 시트로 포함됩니다.")
+
+    s1 = ver.get("sheet1_data") or ps.empty_sheet1()
+    s2 = ver.get("sheet2_data") or ps.empty_sheet2()
+    s3 = ver.get("sheet3_data") or ps.empty_sheet3()
+    vid = ver["id"]
+
+    colcfg_make = {
+        "대분류": st.column_config.TextColumn("대분류"),
+        "중분류": st.column_config.TextColumn("중분류(품목)"),
+        "수량": st.column_config.NumberColumn("수량", default=1),
+        "단가": st.column_config.NumberColumn("단가", format="%.0f"),
+        "비고": st.column_config.TextColumn("비고"),
+    }
+    colcfg_exp = {
+        "구분": st.column_config.TextColumn("구분", disabled=True),
+        "금액": st.column_config.NumberColumn("금액", format="%.0f"),
+        "비고": st.column_config.TextColumn("비고"),
+    }
+
+    with st.expander("별첨1 · 제작비용 (원재료/외주비)"):
+        st.caption("원재료")
+        m_ed = st.data_editor(pd.DataFrame(s1.get("material", [])),
+                              num_rows="dynamic", use_container_width=True,
+                              disabled=not editable, key=f"est_s1m_{vid}",
+                              column_config=colcfg_make)
+        st.caption("외주비")
+        o_ed = st.data_editor(pd.DataFrame(s1.get("outsource", [])),
+                              num_rows="dynamic", use_container_width=True,
+                              disabled=not editable, key=f"est_s1o_{vid}",
+                              column_config=colcfg_make)
+        s1 = {"material": m_ed.to_dict("records"),
+              "outsource": o_ed.to_dict("records")}
+        mat, out = ps.sheet1_totals(s1)
+        st.info(f"재료비 합계: {mat:,.0f}  ·  외주비 합계: {out:,.0f}")
+
+    with st.expander("별첨2 · 직접경비"):
+        s2_ed = st.data_editor(pd.DataFrame(s2), use_container_width=True,
+                               disabled=not editable, key=f"est_s2_{vid}",
+                               column_config=colcfg_exp, hide_index=True)
+        s2 = s2_ed.to_dict("records")
+        st.info(f"직접경비 합계: {ps.sheet_total(s2):,.0f}")
+
+    with st.expander("별첨3 · 현지운영비"):
+        s3_ed = st.data_editor(pd.DataFrame(s3), use_container_width=True,
+                               disabled=not editable, key=f"est_s3_{vid}",
+                               column_config=colcfg_exp, hide_index=True)
+        s3 = s3_ed.to_dict("records")
+        st.info(f"현지운영비 합계: {ps.sheet_total(s3):,.0f}")
+
+    if editable and st.button("💾 별첨 저장", key=f"est_att_save_{vid}"):
+        db.table("estimate_versions").update({
+            "sheet1_data": s1, "sheet2_data": s2, "sheet3_data": s3,
+        }).eq("id", vid).execute()
+        st.success("별첨이 저장되었습니다.")
+        st.rerun()
