@@ -340,34 +340,42 @@ def detail_screen(db, pid, editable):
 
     # ── 별첨1: 제작비용 (원재료/외주비) ──
     with st.expander("📎 별첨1 · 제작비용 내역 (원재료 / 외주비)", expanded=False):
-        st.caption("원재료 항목")
-        mat_df = ps.make_df(s1.get("material", []))
+        # 협력업체 목록 (대분류 드롭다운 옵션)
+        vendor_names = [v["name"] for v in helpers.load_vendors(active_only=False)]
+
+        def make_colcfg(rows):
+            # 기존 입력값도 옵션에 포함 (드롭다운에서 누락 방지)
+            existing = [r.get("대분류") for r in rows
+                        if r.get("대분류") and r.get("대분류") not in vendor_names]
+            opts = [""] + vendor_names + sorted(set(existing))
+            return {
+                "대분류": st.column_config.SelectboxColumn(
+                    "대분류(협력업체)", options=opts,
+                    help="협력업체 목록에서 선택"),
+                "중분류": st.column_config.TextColumn("중분류(품목)"),
+                "수량": st.column_config.NumberColumn("수량", default=1),
+                "단가": st.column_config.NumberColumn("단가", format="%.0f"),
+                "비고": st.column_config.TextColumn("비고"),
+            }
+
+        st.caption("원재료 항목 — 대분류 셀을 클릭하면 협력업체 목록에서 선택")
+        mat_rows0 = s1.get("material", [])
+        mat_df = ps.make_df(mat_rows0)
         mat_ed = st.data_editor(
             mat_df, num_rows="dynamic", use_container_width=True,
             disabled=locked, key=k+"s1m",
             column_order=ps.MAKE_COLS,
-            column_config={
-                "대분류": st.column_config.TextColumn("대분류"),
-                "중분류": st.column_config.TextColumn("중분류(품목)"),
-                "수량": st.column_config.NumberColumn("수량", default=1),
-                "단가": st.column_config.NumberColumn("단가", format="%.0f"),
-                "비고": st.column_config.TextColumn("비고"),
-            })
-        st.caption("외주비 항목")
-        out_df = ps.make_df(s1.get("outsource", []))
+            column_config=make_colcfg(mat_rows0))
+        st.caption("외주비 항목 — 대분류 셀을 클릭하면 협력업체 목록에서 선택")
+        out_rows0 = s1.get("outsource", [])
+        out_df = ps.make_df(out_rows0)
         out_ed = st.data_editor(
             out_df, num_rows="dynamic", use_container_width=True,
             disabled=locked, key=k+"s1o",
             column_order=ps.MAKE_COLS,
-            column_config={
-                "대분류": st.column_config.TextColumn("대분류"),
-                "중분류": st.column_config.TextColumn("중분류(품목)"),
-                "수량": st.column_config.NumberColumn("수량", default=1),
-                "단가": st.column_config.NumberColumn("단가", format="%.0f"),
-                "비고": st.column_config.TextColumn("비고"),
-            })
-        s1 = {"material": mat_ed.to_dict("records"),
-              "outsource": out_ed.to_dict("records")}
+            column_config=make_colcfg(out_rows0))
+        s1 = {"material": ps.clean_records(mat_ed.to_dict("records")),
+              "outsource": ps.clean_records(out_ed.to_dict("records"))}
         mat, out = ps.sheet1_totals(s1)
         st.info(f"재료비 합계: {mat:,.0f}  ·  외주비 합계: {out:,.0f}")
 
@@ -381,7 +389,7 @@ def detail_screen(db, pid, editable):
                 "금액": st.column_config.NumberColumn("금액", format="%.0f"),
                 "비고": st.column_config.TextColumn("비고"),
             }, hide_index=True)
-        s2 = s2_ed.to_dict("records")
+        s2 = ps.clean_records(s2_ed.to_dict("records"))
         dexp = ps.sheet_total(s2)
         st.info(f"직접경비 합계: {dexp:,.0f}")
 
@@ -395,7 +403,7 @@ def detail_screen(db, pid, editable):
                 "금액": st.column_config.NumberColumn("금액", format="%.0f"),
                 "비고": st.column_config.TextColumn("비고"),
             }, hide_index=True)
-        s3 = s3_ed.to_dict("records")
+        s3 = ps.clean_records(s3_ed.to_dict("records"))
         local_ops = ps.sheet_total(s3)
         st.info(f"현지운영비 합계: {local_ops:,.0f} "
                 "(참고용 — 외주비에는 합산되지 않음)")
