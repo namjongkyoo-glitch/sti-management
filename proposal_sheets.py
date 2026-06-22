@@ -67,18 +67,28 @@ def empty_sheet3():
     return [{"구분": n, "금액": 0, "비고": d} for n, d in LOCAL_OPS_ITEMS]
 
 
+def _num(v):
+    """안전한 float 변환 (NaN/None/빈값 -> 0)"""
+    import math
+    try:
+        f = float(v)
+        return 0.0 if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def sheet1_totals(s1):
     """제작비용 합계: (재료비합계, 외주비합계)"""
-    mat = sum(float(r.get("수량") or 0) * float(r.get("단가") or 0)
+    mat = sum(_num(r.get("수량")) * _num(r.get("단가"))
               for r in s1.get("material", []))
-    out = sum(float(r.get("수량") or 0) * float(r.get("단가") or 0)
+    out = sum(_num(r.get("수량")) * _num(r.get("단가"))
               for r in s1.get("outsource", []))
     return mat, out
 
 
 def sheet_total(rows):
     """직접경비/현지운영비 합계"""
-    return sum(float(r.get("금액") or 0) for r in rows)
+    return sum(_num(r.get("금액")) for r in rows)
 
 
 # 별첨1 제작비용 컬럼 순서 (대분류>중분류>수량>단가>비고)
@@ -131,3 +141,30 @@ EXPENSE_NOTES = [
     "잡 급: 국내 일용직 일당(현장청소 용역)",
     "기타비용: 직접경비 중 예비비에 해당하는 항목",
 ]
+
+
+def clean_records(records):
+    """data_editor 결과의 NaN/numpy 타입을 JSON 직렬화 가능하게 정리"""
+    import math
+    cleaned = []
+    for rec in records:
+        new = {}
+        for kk, vv in rec.items():
+            # numpy 타입 -> python 기본형
+            if hasattr(vv, "item"):
+                vv = vv.item()
+            # NaN -> 적절한 기본값
+            if isinstance(vv, float) and math.isnan(vv):
+                vv = 0 if kk in ("수량", "단가", "금액") else ""
+            if vv is None:
+                vv = 0 if kk in ("수량", "단가", "금액") else ""
+            new[kk] = vv
+        cleaned.append(new)
+    return cleaned
+
+
+def clean_sheet1(s1):
+    return {
+        "material": clean_records(s1.get("material", [])),
+        "outsource": clean_records(s1.get("outsource", [])),
+    }
