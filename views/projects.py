@@ -293,6 +293,7 @@ def budget_tab(db, prj, budgets, admin):
                     f"{p.get('project_name') or p.get('title') or ''} "
                     f"(${float(p.get('order_amount') or 0):,.0f})",
                     key=f"manual_prop_{prj['id']}")
+                preview_proposal_detail(msel)
                 mc = st.columns(2)
                 if mc[0].button("⬇️ 이 품의서로 예산 채우기",
                                 key=f"mload_{prj['id']}"):
@@ -319,6 +320,7 @@ def budget_tab(db, prj, budgets, admin):
                 f"{p['doc_no']} · {p.get('proposal_type')} · "
                 f"{p.get('title') or ''} (수주 ${float(p.get('order_amount') or 0):,.0f})",
                 key=f"prop_sel_{prj['id']}")
+            preview_proposal_detail(psel)
             if st.button("⬇️ 이 품의서로 예산 채우기", key=f"load_prop_{prj['id']}"):
                 st.session_state[f"prop_budget_{prj['id']}"] = \
                     proposal_to_budget_df(psel, vendor_opts)
@@ -354,19 +356,44 @@ def budget_tab(db, prj, budgets, admin):
 # 품의서의 직접비/공통비 금액 -> 예산 표 DataFrame
 def proposal_to_budget_df(p, vendor_opts):
     rows = []
-    vb = p.get("vendor_breakdown") or []
-    # 외주비: 업체별 명세가 있으면 업체별로 분해
-    vendor_out_total = 0.0
-    for x in vb:
-        if (x.get("mid") or "") == "외주비":
-            amt = float(x.get("amount") or 0)
+    s1 = p.get("sheet1_data") or {}
+    mat_items = s1.get("material", [])
+    out_items = s1.get("outsource", [])
+
+    # 별첨1이 있으면 항목별(협력업체별)로 예산 생성
+    used_s1 = False
+    if mat_items or out_items:
+        used_s1 = True
+        for it in mat_items:
+            amt = float(it.get("수량") or 0) * float(it.get("단가") or 0)
+            if amt > 0:
+                rows.append({"_id": None, "분류": "원재료",
+                             "항목명": it.get("중분류") or "원재료",
+                             "협력업체": it.get("대분류") or "",
+                             "금액": amt})
+        for it in out_items:
+            amt = float(it.get("수량") or 0) * float(it.get("단가") or 0)
             if amt > 0:
                 rows.append({"_id": None, "분류": "외주비",
-                             "항목명": x.get("item") or "외주",
-                             "협력업체": x.get("vendor") or "",
+                             "항목명": it.get("중분류") or "외주",
+                             "협력업체": it.get("대분류") or "",
                              "금액": amt})
-                vendor_out_total += amt
-    # 그 외 직접비/공통비는 계정 합계로
+
+    # vendor_breakdown(구버전 외주 명세) — 별첨1을 안 썼을 때만
+    vendor_out_total = 0.0
+    if not used_s1:
+        vb = p.get("vendor_breakdown") or []
+        for x in vb:
+            if (x.get("mid") or "") == "외주비":
+                amt = float(x.get("amount") or 0)
+                if amt > 0:
+                    rows.append({"_id": None, "분류": "외주비",
+                                 "항목명": x.get("item") or "외주",
+                                 "협력업체": x.get("vendor") or "",
+                                 "금액": amt})
+                    vendor_out_total += amt
+
+    # 직접경비/공통비 + 별첨1 안 쓴 경우의 재료비/외주비 잔여
     mapping = [
         ("원재료", "재료비", "material_cost"),
         ("외주비", "외주비", "outsourcing_cost"),
@@ -377,8 +404,10 @@ def proposal_to_budget_df(p, vendor_opts):
     ]
     for mid, label, field in mapping:
         amt = float(p.get(field) or 0)
+        # 별첨1로 이미 처리한 원재료/외주비는 건너뜀
+        if used_s1 and mid in ("원재료", "외주비"):
+            continue
         if mid == "외주비":
-            # 업체별로 이미 분해한 만큼은 제외, 나머지(미지정분)만 추가
             remain = amt - vendor_out_total
             if remain > 0.01:
                 rows.append({"_id": None, "분류": "외주비",
@@ -548,3 +577,87 @@ def history_tab(db, pid):
                 "변경 후": f"${float(d.get('after') or 0):,.2f}",
                 "증감": f"${float(d.get('증감') or 0):+,.2f}",
             } for d in detail]), use_container_width=True, hide_index=True)
+
+
+def preview_proposal_detail(p):
+    """예산 불러오기 전 품의서 + 별첨 세부항목 미리보기"""
+    import proposal_sheets as ps
+    with st.expander("👁️ 품의서 내용 미리보기 (별첨 세부항목 포함)",
+                     expanded=False):
+        # 품의서 요약 (집행내역 형태)
+        cur = "원" if p.get("currency") == "KRW" else "USD"
+        order = float(p.get("order_amount") or 0)
+        mat = float(p.get("material_cost") or 0)
+        out = float(p.get("outsourcing_cost") or 0)
+        dexp = float(p.get("direct_expense") or 0)
+        lab = float(p.get("labor_cost") or 0)
+        mfg = float(p.get("mfg_overhead") or 0)
+        sga = float(p.get("sga_cost") or 0)
+        c_sub = mat + out + dexp
+        d_sub = lab + mfg + sga
+        total = c_sub + d_sub
+        st.markdown(f"**집행 내역** (단위: {cur})")
+        summary = pd.DataFrame([
+            {"구분": "(A) 수주금액", "금액": order, "비율": "100%"},
+            {"구분": "재료비", "금액": mat,
+             "비율": f"{mat/order*100:.0f}%" if order else "-"},
+            {"구분": "외주비", "금액": out,
+             "비율": f"{out/order*100:.0f}%" if order else "-"},
+            {"구분": "직접경비", "금액": dexp,
+             "비율": f"{dexp/order*100:.0f}%" if order else "-"},
+            {"구분": "(C) 직접비 소계", "금액": c_sub,
+             "비율": f"{c_sub/order*100:.0f}%" if order else "-"},
+            {"구분": "노무비", "금액": lab, "비율": ""},
+            {"구분": "제조간접경비", "금액": mfg, "비율": ""},
+            {"구분": "판관비", "금액": sga, "비율": ""},
+            {"구분": "(D) 간접비 소계", "금액": d_sub,
+             "비율": f"{d_sub/order*100:.0f}%" if order else "-"},
+            {"구분": "(E) 총원가", "금액": total,
+             "비율": f"{total/order*100:.0f}%" if order else "-"},
+        ])
+        st.dataframe(
+            summary.style.format({"금액": "{:,.0f}"}),
+            use_container_width=True, hide_index=True)
+
+        # 별첨1: 제작비용 (협력업체별)
+        s1 = p.get("sheet1_data") or {}
+        mat_items = s1.get("material", [])
+        out_items = s1.get("outsource", [])
+        if mat_items or out_items:
+            st.markdown("**📎 별첨1 · 제작비용 (협력업체별)**")
+            rows1 = []
+            for it in mat_items:
+                amt = float(it.get("수량") or 0) * float(it.get("단가") or 0)
+                rows1.append({"구분": "원재료", "협력업체": it.get("대분류") or "",
+                              "품목": it.get("중분류") or "", "수량": it.get("수량"),
+                              "단가": it.get("단가"), "금액": amt})
+            for it in out_items:
+                amt = float(it.get("수량") or 0) * float(it.get("단가") or 0)
+                rows1.append({"구분": "외주비", "협력업체": it.get("대분류") or "",
+                              "품목": it.get("중분류") or "", "수량": it.get("수량"),
+                              "단가": it.get("단가"), "금액": amt})
+            if rows1:
+                st.dataframe(
+                    pd.DataFrame(rows1).style.format(
+                        {"금액": "{:,.0f}", "단가": "{:,.0f}"}),
+                    use_container_width=True, hide_index=True)
+
+        # 별첨2: 직접경비
+        s2 = p.get("sheet2_data") or []
+        s2_nonzero = [r for r in s2 if float(r.get("금액") or 0) > 0]
+        if s2_nonzero:
+            st.markdown("**📎 별첨2 · 직접경비**")
+            st.dataframe(
+                pd.DataFrame(s2_nonzero)[["구분", "금액", "비고"]].style.format(
+                    {"금액": "{:,.0f}"}),
+                use_container_width=True, hide_index=True)
+
+        # 별첨3: 현지운영비
+        s3 = p.get("sheet3_data") or []
+        s3_nonzero = [r for r in s3 if float(r.get("금액") or 0) > 0]
+        if s3_nonzero:
+            st.markdown("**📎 별첨3 · 현지운영비**")
+            st.dataframe(
+                pd.DataFrame(s3_nonzero)[["구분", "금액", "비고"]].style.format(
+                    {"금액": "{:,.0f}"}),
+                use_container_width=True, hide_index=True)
